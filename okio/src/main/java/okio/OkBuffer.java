@@ -408,10 +408,71 @@ public final class OkBuffer implements BufferedSource, BufferedSink, Cloneable {
     return write(byteString.data, 0, byteString.data.length);
   }
 
+
   @Override public OkBuffer writeUtf8(String string) {
     // TODO: inline UTF-8 encoding to save allocating a byte[]?
     byte[] data = string.getBytes(Util.UTF_8);
     return write(data, 0, data.length);
+  }
+
+  public OkBuffer writeUtf8embedded(String string) {
+    Segment tail = writableSegment(1);
+    byte[] data = tail.data; // TODO: broken. Segments change.
+    for (int i = 0, length = string.length(); i < length; i++) {
+      int ch = string.charAt(i);
+      if (ch < 0x80) {
+        // One byte.
+        data[tail.limit++] = (byte) ch;
+        size += 1;
+      } else if (ch < 0x800) {
+        // Two bytes.
+        data[tail.limit++] = (byte) ((ch >> 6) | 0xc0);
+        data[tail.limit++] = (byte) ((ch & 0x3f) | 0x80);
+        size += 2;
+      } else if (U16_IS_SURROGATE(ch)) {
+        // A supplementary character.
+        int high = ch;
+        int low = (i + 1 != length) ? string.charAt(i + 1) : 0;
+        if (!U16_IS_SURROGATE_LEAD(high) || !U16_IS_SURROGATE_TRAIL(low)) {
+          data[tail.limit++] = ('?');
+          size += 1;
+          continue;
+        }
+        // Now we know we have a *valid* surrogate pair, we can consume the low surrogate.
+        ++i;
+        ch = U16_GET_SUPPLEMENTARY(high, low);
+        // Four bytes.
+        data[tail.limit++] = (byte) ((ch >> 18) | 0xf0);
+        data[tail.limit++] = (byte) (((ch >> 12) & 0x3f) | 0x80);
+        data[tail.limit++] = (byte) (((ch >> 6) & 0x3f) | 0x80);
+        data[tail.limit++] = (byte) ((ch & 0x3f) | 0x80);
+        size += 4;
+      } else {
+        data[tail.limit++] = (byte) ((ch >> 12) | 0xe0);
+        data[tail.limit++] = (byte) (((ch >> 6) & 0x3f) | 0x80);
+        data[tail.limit++] = (byte) ((ch & 0x3f) | 0x80);
+        size += 3;
+      }
+    }
+    return this;
+  }
+
+  private static final int SURROGATE_OFFSET = 0x10000 - (0xD800 << 10) - 0xDC00;
+
+  private int U16_GET_SUPPLEMENTARY(int lead, int trail) {
+    return (lead << 10) + trail + SURROGATE_OFFSET;
+  }
+
+  private boolean U16_IS_SURROGATE(int c) {
+    return 0xD800 <= c && c <= 0xDFFF;
+  }
+
+  private boolean U16_IS_SURROGATE_LEAD(int c) {
+    return c >= 0xD800 && c <= 0xDBFF;
+  }
+
+  private boolean U16_IS_SURROGATE_TRAIL(int c) {
+    return c >= 0xDC00 && c <= 0xDFFF;
   }
 
   @Override public OkBuffer write(byte[] source) {

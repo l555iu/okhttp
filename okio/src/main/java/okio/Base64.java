@@ -115,6 +115,10 @@ final class Base64 {
       '5', '6', '7', '8', '9', '+', '/'
   };
 
+  public static void main(String[] args) {
+    System.out.println(new String(MAP));
+  }
+
   public static String encode(byte[] in) {
     int length = (in.length + 2) * 4 / 3;
     byte[] out = new byte[length];
